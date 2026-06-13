@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Fake News Detection AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Professional Sidebar -->
+        <div class="sidebar">
+            <a href="/" class="logo">FakeNews<span>AI</span></a>
+            <div class="sidebar-nav">
+                <a href="/dashboard"><i class="fas fa-chart-pie"></i> Dashboard</a>
+                <a href="/analytics"><i class="fas fa-chart-line"></i> Analytics</a>
+                <a href="/history"><i class="fas fa-history"></i> History</a>
+                {% if current_user.is_admin %}
+                <a href="/admin" class="active"><i class="fas fa-shield-alt"></i> Admin Area</a>
+                {% endif %}
+            </div>
+            <form action="/delete_my_account" method="POST" onsubmit="return confirm('Are you sure you want to completely delete your account? All your history will be permanently lost. This action cannot be undone.');" class="mt-auto" style="margin-bottom: 10px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger w-100" style="border-radius: 12px; padding: 12px; text-align: left; background: rgba(239, 68, 68, 0.05); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3);">
+                    <i class="fas fa-trash-alt me-2"></i> Delete Account
+                </button>
+            </form>
+            <a href="/logout" class="btn btn-outline-danger" style="border-radius: 12px; padding: 12px;"><i class="fas fa-sign-out-alt me-2"></i> Secure Logout</a>
+        </div>
+
+        <!-- Main Dashboard Content -->
+        <div class="main-content">
+            <div class="container-fluid m-0 p-0">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <h1 class="mb-4" style="color: var(--text-main); font-size: 32px;"><i class="fas fa-shield-alt" style="color: var(--accent); margin-right: 10px;"></i>Admin Control Panel</h1>
+
+        <!-- Admin Stats -->
+        <div class="row mb-5">
+            <div class="col-md-6">
+                <div class="stat-card" style="border-top: 4px solid #3b82f6;">
+                    <h3>Total Registered Users</h3>
+                    <div class="value" style="color: #3b82f6;">{{ users|length }}</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card" style="border-top: 4px solid #8b5cf6;">
+                    <h3>Total System Predictions</h3>
+                    <div class="value" style="color: #8b5cf6;">{{ predictions|length }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- Users Management -->
+            <div class="col-lg-6">
+                <div class="card p-4 h-100 shadow-sm">
+                    <h3 style="color: var(--text-main); border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 20px;">
+                        <i class="fas fa-users" style="margin-right: 10px;"></i>User Management
+                    </h3>
+                    
+                    <div style="overflow-x: auto;">
+                        <table class="table table-dark table-hover" style="background: transparent;">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for user in users %}
+                                <tr>
+                                    <td>#{{ user.id }}</td>
+                                    <td>{{ user.name }}</td>
+                                    <td>{{ user.email }}</td>
+                                    <td>
+                                        {% if user.is_admin %}
+                                            <span class="badge bg-danger">Admin</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">User</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if not user.is_admin %}
+                                        <form action="{{ url_for('delete_user', user_id=user.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this user and all their predictions?');">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                                        </form>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Global Predictions -->
+            <div class="col-lg-6">
+                <div class="card p-4 h-100 shadow-sm">
+                    <h3 style="color: var(--text-main); border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 20px;">
+                        <i class="fas fa-globe" style="margin-right: 10px;"></i>Global Activity Log
+                    </h3>
+                    
+                    <div style="overflow-x: auto; max-height: 400px; overflow-y: auto;">
+                        <table class="table table-dark table-hover" style="background: transparent;">
+                            <thead style="position: sticky; top: 0; background: var(--bg-dark);">
+                                <tr>
+                                    <th>User ID</th>
+                                    <th>Date</th>
+                                    <th>Result</th>
+                                    <th>Confidence</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for pred in predictions %}
+                                <tr>
+                                    <td>
+                                        {% if pred.user_id %}
+                                            #{{ pred.user_id }}
+                                        {% else %}
+                                            <span style="color: var(--text-muted);">Guest</span>
+                                        {% endif %}
+                                    </td>
+                                    <td style="color: var(--text-muted); font-size: 14px;">{{ pred.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td>
+                                        {% if pred.result == 'Fake News' %}
+                                            <span style="color: var(--danger); font-weight: 500;">Fake</span>
+                                        {% else %}
+                                            <span style="color: var(--success); font-weight: 500;">Real</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ pred.confidence }}%</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics - Fake News Detection AI</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Professional Sidebar -->
+        <div class="sidebar">
+            <a href="/" class="logo">FakeNews<span>AI</span></a>
+            <div class="sidebar-nav">
+                <a href="/dashboard"><i class="fas fa-chart-pie"></i> Dashboard</a>
+                <a href="/analytics" class="active"><i class="fas fa-chart-line"></i> Analytics</a>
+                <a href="/history"><i class="fas fa-history"></i> History</a>
+                {% if current_user.is_admin %}
+                <a href="/admin"><i class="fas fa-shield-alt"></i> Admin Area</a>
+                {% endif %}
+            </div>
+            <form action="/delete_my_account" method="POST" onsubmit="return confirm('Are you sure you want to completely delete your account? All your history will be permanently lost. This action cannot be undone.');" class="mt-auto" style="margin-bottom: 10px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger w-100" style="border-radius: 12px; padding: 12px; text-align: left; background: rgba(239, 68, 68, 0.05); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3);">
+                    <i class="fas fa-trash-alt me-2"></i> Delete Account
+                </button>
+            </form>
+            <a href="/logout" class="btn btn-outline-danger" style="border-radius: 12px; padding: 12px;"><i class="fas fa-sign-out-alt me-2"></i> Secure Logout</a>
+        </div>
+
+        <!-- Main Dashboard Content -->
+        <div class="main-content">
+            <div class="container-fluid m-0 p-0">
+                <h1 style="color: var(--text-main); font-size: 32px; margin-bottom: 5px;">Your Analytics</h1>
+                <p style="color: var(--text-muted); margin-bottom: 30px;">Overview of your Fake News detection history.</p>
+
+                <!-- Top Level Stats (Bootstrap Grid) -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="stat-card">
+                            <h3>Total Analyzed</h3>
+                            <div class="value">{{ total_predictions }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="stat-card" style="border-top: 4px solid var(--danger);">
+                            <h3>Fake News Detected</h3>
+                            <div class="value" style="color: var(--danger);">{{ fake_count }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="stat-card" style="border-top: 4px solid var(--success);">
+                            <h3>Real News Verified</h3>
+                            <div class="value" style="color: var(--success);">{{ real_count }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visual Analytics Dashboard (Chart.js) -->
+                <div class="row">
+                    <div class="col-md-6 mb-4">
+                        <div class="card p-4 h-100 shadow-sm">
+                            <h4 class="text-center mb-4" style="color: var(--text-muted);">Fake vs Real Percentage</h4>
+                            <div style="position: relative; height:300px; width:100%; display:flex; justify-content:center;">
+                                {% if total_predictions > 0 %}
+                                    <canvas id="pieChart"></canvas>
+                                {% else %}
+                                    <p class="text-center mt-5" style="color: var(--text-muted);">No data available yet.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-4">
+                        <div class="card p-4 h-100 shadow-sm">
+                            <h4 class="text-center mb-4" style="color: var(--text-muted);">Prediction Distribution</h4>
+                            <div style="position: relative; height:300px; width:100%; display:flex; justify-content:center;">
+                                {% if total_predictions > 0 %}
+                                    <canvas id="barChart"></canvas>
+                                {% else %}
+                                    <p class="text-center mt-5" style="color: var(--text-muted);">No data available yet.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart Setup Scripts -->
+    {% if total_predictions > 0 %}
+    <script>
+        const ctxPie = document.getElementById('pieChart').getContext('2d');
+        new Chart(ctxPie, {
+            type: 'doughnut',
+            data: {
+                labels: ['Fake News', 'Real News'],
+                datasets: [{
+                    data: [Number("{{ fake_count }}"), Number("{{ real_count }}")],
+                    backgroundColor: ['rgba(239, 68, 68, 0.8)', 'rgba(16, 185, 129, 0.8)'],
+                    borderColor: ['#ef4444', '#10b981'],
+                    borderWidth: 1,
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom', labels: { color: '#f8fafc' } } }
+            }
+        });
+
+        const ctxBar = document.getElementById('barChart').getContext('2d');
+        new Chart(ctxBar, {
+            type: 'bar',
+            data: {
+                labels: ['Fake News', 'Real News'],
+                datasets: [{
+                    label: 'Number of Articles',
+                    data: [Number("{{ fake_count }}"), Number("{{ real_count }}")],
+                    backgroundColor: ['rgba(239, 68, 68, 0.5)', 'rgba(16, 185, 129, 0.5)'],
+                    borderColor: ['#ef4444', '#10b981'],
+                    borderWidth: 2,
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { ticks: { color: '#f8fafc' }, grid: { display: false } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

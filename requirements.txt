@@ -1,0 +1,14 @@
+Flask==3.0.0
+scikit-learn
+pandas
+numpy
+nltk
+Werkzeug
+torch
+transformers
+Flask-WTF
+beautifulsoup4
+requests
+textblob
+PyPDF2
+gunicorn

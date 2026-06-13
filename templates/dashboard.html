@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Fake News Detection AI</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="manifest" href="/static/manifest.json">
+    <!-- Bootstrap integration as per synopsis -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Professional Sidebar -->
+        <div class="sidebar">
+            <a href="/" class="logo">FakeNews<span>AI</span></a>
+            <div class="sidebar-nav">
+                <a href="/dashboard" class="active"><i class="fas fa-chart-pie"></i> Dashboard</a>
+                <a href="/analytics"><i class="fas fa-chart-line"></i> Analytics</a>
+                <a href="/history"><i class="fas fa-history"></i> History</a>
+                {% if current_user.is_admin %}
+                <a href="/admin"><i class="fas fa-shield-alt"></i> Admin Area</a>
+                {% endif %}
+            </div>
+            <form action="/delete_my_account" method="POST" onsubmit="return confirm('Are you sure you want to completely delete your account? All your history will be permanently lost. This action cannot be undone.');" class="mt-auto" style="margin-bottom: 10px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger w-100" style="border-radius: 12px; padding: 12px; text-align: left; background: rgba(239, 68, 68, 0.05); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3);">
+                    <i class="fas fa-trash-alt me-2"></i> Delete Account
+                </button>
+            </form>
+            <a href="/logout" class="btn btn-outline-danger" style="border-radius: 12px; padding: 12px;"><i class="fas fa-sign-out-alt me-2"></i> Secure Logout</a>
+        </div>
+
+        <!-- Main Dashboard Content -->
+        <div class="main-content">
+            <div class="container-fluid m-0 p-0">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 style="color: var(--text-main); font-size: 32px;">Welcome, {{ current_user.name }}</h1>
+                <p style="color: var(--text-muted); margin-top: 5px;">Analyze new articles to check their authenticity.</p>
+            </div>
+            <div class="d-flex align-items-center">
+                <button id="installAppBtn" class="btn btn-outline-primary me-3" style="display: none; font-weight: 600;" onclick="installPWA()">
+                    <i class="fas fa-download"></i> Install App
+                </button>
+                <button id="themeToggle" class="btn btn-outline-secondary" onclick="toggleTheme()" style="border-radius: 50%; width: 45px; height: 45px; display: flex; align-items: center; justify-content: center; color: var(--text-main); border-color: var(--border-color);">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Prediction Section moved from homepage -->
+        <div class="card p-4 mb-5 shadow-sm">
+            <h3 class="mb-4" style="color: var(--text-main);">Analyze a News Article</h3>
+            
+            <div class="demo-buttons mb-3 d-flex align-items-center">
+                <span style="color: var(--text-muted); font-size: 14px; margin-right: 10px;">Try Demo:</span>
+                <button class="btn btn-sm btn-outline-success me-2" onclick="fillDemo('real')">Load Real News</button>
+                <button class="btn btn-sm btn-outline-danger me-4" onclick="fillDemo('fake')">Load Fake News</button>
+                
+                <span style="color: var(--text-muted); font-size: 14px; margin-right: 10px;">Or Upload:</span>
+                <input type="file" id="fileInput" accept=".txt,.pdf" style="display:none;" onchange="handleFileUpload(event)">
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="document.getElementById('fileInput').click()">
+                    <i class="fas fa-upload"></i> Upload File (.txt, .pdf)
+                </button>
+            </div>
+
+            <form id="predictForm" action="/predict" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="input-group">
+                    <textarea name="news" id="news" placeholder="Paste the news article text or a website URL (http://...) here..."></textarea>
+                    <button type="submit" id="submitBtn">
+                        <span id="btnText">Analyze Article</span>
+                        <div id="loader" class="loader" style="display: none;"></div>
+                    </button>
+                </div>
+            </form>
+
+            <div id="resultBox" class="result-box" style="display: none;">
+                <div id="resultContent"></div>
+            </div>
+        </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const realDemos = [
+            "The Federal Reserve announced today that it will maintain its current interest rate target, citing steady economic growth and inflation figures that align with their long-term projections. Markets responded positively to the news.",
+            "Apple Inc. reported a 5% increase in quarterly revenue today, driven by strong iPhone sales in emerging markets. The company's CEO stated that they plan to expand their renewable energy initiatives over the next decade.",
+            "According to the World Health Organization's latest report, global vaccination rates have improved significantly in the past year, reducing the spread of preventable diseases in several regions.",
+            "The local city council approved a new budget plan yesterday that includes increased funding for public parks, road repairs, and community centers. Construction is expected to begin early next spring."
+        ];
+
+        const fakeDemos = [
+            "BREAKING: The government has officially announced that taxes will be completely abolished starting next month! Secret documents reveal that an anonymous billionaire has paid off the entire national debt.",
+            "SHOCKING MIRACLE! A local man claims he has discovered a magic cure for all diseases using only lemon juice and baking soda! Doctors hate him, you won't believe what happens next!",
+            "OMG! NASA scientists just confirmed that an alien mothership is hovering over New York City! Mainstream media is trying to keep this secret, but leaked photos prove it is 100% real and coming for us!",
+            "WARNING: If you don't forward this message to 10 friends, your WhatsApp account will be permanently deleted tomorrow. This is an official update from Mark Zuckerberg himself!"
+        ];
+
+        function fillDemo(type) {
+            const textarea = document.getElementById('news');
+            if(type === 'real') {
+                const randomReal = realDemos[Math.floor(Math.random() * realDemos.length)];
+                textarea.value = randomReal;
+            } else {
+                const randomFake = fakeDemos[Math.floor(Math.random() * fakeDemos.length)];
+                textarea.value = randomFake;
+            }
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const btnText = document.getElementById('btnText');
+            const loader = document.getElementById('loader');
+            btnText.style.display = 'none';
+            loader.style.display = 'block';
+            
+            try {
+                const response = await fetch('/upload_file', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: formData
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    document.getElementById('news').value = data.text;
+                    alert('File uploaded and text extracted successfully! Click "Analyze Article" to proceed.');
+                } else {
+                    alert(data.error);
+                }
+            } catch (err) {
+                alert('Failed to upload file');
+            } finally {
+                btnText.style.display = 'block';
+                loader.style.display = 'none';
+                event.target.value = ''; // Reset input
+            }
+        }
+        
+        async function fetchExtraAnalysis(newsText) {
+            try {
+                const response = await fetch('/analyze_extra', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: JSON.stringify({ text: newsText })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    const extraBox = document.createElement('div');
+                    extraBox.style.marginTop = '20px';
+                    extraBox.style.padding = '15px';
+                    extraBox.style.background = 'rgba(255, 255, 255, 0.05)';
+                    extraBox.style.borderRadius = '8px';
+                    extraBox.style.borderLeft = data.emotion_level.includes('High') ? '4px solid #ef4444' : '4px solid #3b82f6';
+                    
+                    let summaryHtml = '<ul style="margin: 0; padding-left: 20px; font-size: 14px;">';
+                    data.summary.forEach(sentence => {
+                        summaryHtml += `<li style="margin-bottom: 5px;">${sentence}</li>`;
+                    });
+                    summaryHtml += '</ul>';
+                    
+                    extraBox.innerHTML = `
+                        <h4 style="font-size: 16px; margin-bottom: 10px;"><i class="fas fa-brain"></i> Advanced Analysis</h4>
+                        <div style="font-size: 14px; margin-bottom: 10px;">
+                            <strong>Tone / Emotion:</strong> ${data.tone} <br>
+                            <strong>Manipulation Level:</strong> ${data.emotion_level}
+                        </div>
+                        <div style="font-size: 14px;">
+                            <strong>Auto-Summary:</strong>
+                            ${summaryHtml}
+                        </div>
+                    `;
+                    
+                    // Insert before the feedback section
+                    const resultContent = document.getElementById('resultContent');
+                    const feedbackSection = resultContent.lastElementChild;
+                    resultContent.insertBefore(extraBox, feedbackSection);
+                }
+            } catch (err) {
+                console.error("Failed to fetch extra analysis", err);
+            }
+        }
+
+        async function submitFeedback(predictionId, feedbackValue) {
+            try {
+                const response = await fetch('/feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: JSON.stringify({ prediction_id: predictionId, feedback: feedbackValue })
+                });
+                const data = await response.json();
+                if(response.ok) {
+                    alert('Thank you for your feedback!');
+                } else {
+                    alert(data.error);
+                }
+            } catch (err) {
+                alert('Failed to submit feedback');
+            }
+        }
+
+        document.getElementById('predictForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const news = document.getElementById('news').value;
+            const btnText = document.getElementById('btnText');
+            const loader = document.getElementById('loader');
+            const resultBox = document.getElementById('resultBox');
+            const resultContent = document.getElementById('resultContent');
+
+            if (!news.trim()) return;
+
+            btnText.style.display = 'none';
+            loader.style.display = 'block';
+            
+            // Show premium skeleton loading state
+            resultBox.className = 'result-box'; // reset colors
+            resultBox.style.display = 'block';
+            resultContent.innerHTML = `
+                <div class="skeleton skeleton-title"></div>
+                <div class="skeleton skeleton-text" style="width: 80%; margin: 0 auto 10px auto;"></div>
+                <div class="skeleton skeleton-text" style="width: 60%; margin: 0 auto;"></div>
+                <div class="confidence" style="margin-top: 30px;">
+                    <div class="skeleton skeleton-bar"></div>
+                </div>
+            `;
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: JSON.stringify({ news: news })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const isFake = data.prediction === 'Fake News';
+                    resultBox.className = `result-box ${isFake ? 'fake' : 'real'}`;
+                    resultBox.style.display = 'block';
+                    
+                    let keywordsHtml = '';
+                    if (data.found_fake_words && data.found_fake_words.length > 0) {
+                        keywordsHtml += `<div style="margin-top: 10px; font-size: 13px;"><strong>Suspicious words:</strong> <span style="color: #ef4444;">${data.found_fake_words.join(', ')}</span></div>`;
+                    }
+                    if (data.found_real_words && data.found_real_words.length > 0) {
+                        keywordsHtml += `<div style="margin-top: 5px; font-size: 13px;"><strong>Authentic words:</strong> <span style="color: #10b981;">${data.found_real_words.join(', ')}</span></div>`;
+                    }
+
+                    resultContent.innerHTML = `
+                        <h3>${data.prediction}</h3>
+                        <div class="confidence">
+                            <div class="confidence-bar">
+                                <div class="confidence-level" style="width: ${data.confidence}%"></div>
+                            </div>
+                            <span>Confidence: ${data.confidence}%</span>
+                        </div>
+                        
+                        ${keywordsHtml ? `<div style="margin-top: 20px; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">${keywordsHtml}</div>` : ''}
+
+                        <div style="margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                            <p style="font-size: 14px; margin-bottom: 10px;">Was this prediction accurate?</p>
+                            <button class="btn btn-sm btn-outline-success me-2" onclick="submitFeedback(${data.prediction_id}, 1)"><i class="fas fa-thumbs-up"></i> Yes</button>
+                            <button class="btn btn-sm btn-outline-danger me-4" onclick="submitFeedback(${data.prediction_id}, -1)"><i class="fas fa-thumbs-down"></i> No</button>
+                            
+                            <a href="https://api.whatsapp.com/send?text=I%20just%20fact-checked%20a%20news%20article!%20It%20turns%20out%20to%20be%20*${data.prediction}*.%20Verify%20your%20news%20at%20TruthGuard!" target="_blank" class="btn btn-sm btn-success" style="background-color: #25D366; border-color: #25D366;">
+                                <i class="fab fa-whatsapp"></i> Share on WhatsApp
+                            </a>
+                        </div>
+                    `;
+                    
+                    // Trigger the extra analysis asynchronously without blocking the UI
+                    fetchExtraAnalysis(news);
+                } else {
+                    alert(data.error || 'An error occurred');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to connect to the server');
+            } finally {
+                btnText.style.display = 'block';
+                loader.style.display = 'none';
+            }
+        });
+        function toggleTheme() {
+            document.body.classList.toggle('light-mode');
+            const icon = document.querySelector('#themeToggle i');
+            if (document.body.classList.contains('light-mode')) {
+                icon.className = 'fas fa-sun';
+            } else {
+                icon.className = 'fas fa-moon';
+            }
+        }
+
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('installAppBtn').style.display = 'block';
+        });
+
+        function installPWA() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    if (choiceResult.outcome === 'accepted') {
+                        document.getElementById('installAppBtn').style.display = 'none';
+                    }
+                    deferredPrompt = null;
+                });
+            }
+        }
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js').then(reg => {
+                    console.log('ServiceWorker registration successful');
+                }).catch(err => {
+                    console.log('ServiceWorker registration failed: ', err);
+                });
+            });
+        }
+    </script>
+</body>
+</html>

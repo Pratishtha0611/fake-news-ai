@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>History - Fake News Detection AI</title>
+    <!-- Bootstrap integration as per synopsis -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Professional Sidebar -->
+        <div class="sidebar">
+            <a href="/" class="logo">FakeNews<span>AI</span></a>
+            <div class="sidebar-nav">
+                <a href="/dashboard"><i class="fas fa-chart-pie"></i> Dashboard</a>
+                <a href="/analytics"><i class="fas fa-chart-line"></i> Analytics</a>
+                <a href="/history" class="active"><i class="fas fa-history"></i> History</a>
+                {% if current_user.is_admin %}
+                <a href="/admin"><i class="fas fa-shield-alt"></i> Admin Area</a>
+                {% endif %}
+            </div>
+            <form action="/delete_my_account" method="POST" onsubmit="return confirm('Are you sure you want to completely delete your account? All your history will be permanently lost. This action cannot be undone.');" class="mt-auto" style="margin-bottom: 10px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger w-100" style="border-radius: 12px; padding: 12px; text-align: left; background: rgba(239, 68, 68, 0.05); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3);">
+                    <i class="fas fa-trash-alt me-2"></i> Delete Account
+                </button>
+            </form>
+            <a href="/logout" class="btn btn-outline-danger" style="border-radius: 12px; padding: 12px;"><i class="fas fa-sign-out-alt me-2"></i> Secure Logout</a>
+        </div>
+
+        <!-- Main Dashboard Content -->
+        <div class="main-content">
+            <div class="container-fluid m-0 p-0">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 style="color: var(--text-main); font-size: 32px; margin: 0;">Your Analysis History</h1>
+            <a href="/export" class="btn btn-outline-primary"><i class="fas fa-download me-2"></i>Export CSV</a>
+        </div>
+        
+        <div class="card" style="padding: 20px;">
+            {% if history %}
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date & Time</th>
+                            <th>News Excerpt</th>
+                            <th>Result</th>
+                            <th>Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in history %}
+                        <tr>
+                            <td style="color: var(--text-muted); font-size: 14px;">{{ row.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td style="max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                {{ row.news }}
+                            </td>
+                            <td>
+                                {% if row.result == 'Fake News' %}
+                                    <span class="badge fake">Fake News</span>
+                                {% else %}
+                                    <span class="badge real">Real News</span>
+                                {% endif %}
+                            </td>
+                            <td><strong>{{ row.confidence }}%</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                <p>You haven't analyzed any news yet.</p>
+                <a href="/" class="btn-primary" style="display: inline-block; width: auto; margin-top: 15px;">Analyze News Now</a>
+            </div>
+            {% endif %}
+        </div>
+        </div>
+    </div>
+</body>
+</html>

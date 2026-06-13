@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - Fake News Detection AI</title>
+    <!-- Bootstrap integration as per synopsis -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <nav class="navbar">
+        <a href="/" class="logo">FakeNews<span>AI</span></a>
+        <div class="nav-links">
+            <a href="/login" class="btn-nav">Login</a>
+        </div>
+    </nav>
+
+    <div class="container" style="display: flex; align-items: center; justify-content: center;">
+        <div class="card auth-box">
+            
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-messages">
+                        {% for category, message in messages %}
+                            <div class="flash {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            <h2>Create Account</h2>
+            <p class="subtitle">Join us to start analyzing news authenticity</p>
+
+            <form action="/signup" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="input-group">
+                    <label>Full Name</label>
+                    <input type="text" name="name" required placeholder="John Doe">
+                </div>
+                <div class="input-group">
+                    <label>Email Address</label>
+                    <input type="email" name="email" required placeholder="you@example.com">
+                </div>
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" name="password" required placeholder="Create a strong password" minlength="6">
+                </div>
+                <button type="submit" class="btn-primary" style="margin-top: 10px;">Create Account</button>
+            </form>
+            
+            <p class="text-center" style="margin-top: 25px; color: var(--text-muted); font-size: 14px;">
+                Already have an account? <a href="/login">Login here</a>
+            </p>
+        </div>
+    </div>
+
+</body>
+</html>
