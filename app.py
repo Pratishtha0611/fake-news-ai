@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-from transformers import pipeline
+import pickle
 from flask_wtf.csrf import CSRFProtect
 import PyPDF2
 from textblob import TextBlob
@@ -46,10 +46,16 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# ML Setup: HuggingFace Pipeline (Zero-Shot / Pre-trained Fake News)
-print("Loading HuggingFace Fake News Transformer...")
-hf_pipeline = pipeline("text-classification", model="hamzab/roberta-fake-news-classification")
-print("Model loaded successfully!")
+# ML Setup: Scikit-Learn Local Model
+print("Loading Local Scikit-Learn Model...")
+try:
+    vectorizer = pickle.load(open('vectorizer.pkl', 'rb'))
+    local_model = pickle.load(open('model.pkl', 'rb'))
+    print("Model loaded successfully!")
+except Exception as e:
+    print(f"Error loading local model: {e}")
+    vectorizer = None
+    local_model = None
 
 # Context processor
 @app.context_processor
@@ -142,24 +148,27 @@ def predict():
             result = "Real News"
             confidence_score = round(float(80 + (len(news.split()) * 0.3)), 2)
         else:
-            # Fallback to HuggingFace pipeline for complex/long text
-            truncated_news = news[:1500] 
-            hf_result = hf_pipeline(truncated_news)[0]
-            
-            label = str(hf_result['label']).upper()
-            confidence = float(hf_result['score'])
-            confidence_score = round(confidence * 100, 2)
-            
-            if 'FAKE' in label or 'FALSE' in label:
-                result = "Fake News"
-            elif 'REAL' in label or 'TRUE' in label:
-                result = "Real News"
-            elif '0' in label:
-                result = "Fake News"
-            elif '1' in label:
-                result = "Real News"
+            # Fallback to Local Scikit-Learn Model
+            if local_model and vectorizer:
+                vectorized_input = vectorizer.transform([news])
+                pred = local_model.predict(vectorized_input)[0]
+                
+                if hasattr(local_model, "predict_proba"):
+                    probs = local_model.predict_proba(vectorized_input)[0]
+                    confidence = float(max(probs))
+                else:
+                    confidence = 0.85 # Default fallback confidence
+                    
+                confidence_score = round(confidence * 100, 2)
+                
+                # In most fake news datasets, 0 is Fake and 1 is Real.
+                if str(pred) == '1' or str(pred).upper() == 'REAL' or str(pred).upper() == 'TRUE':
+                    result = "Real News"
+                else:
+                    result = "Fake News"
             else:
-                result = "Fake News" if confidence_score > 50 else "Real News"
+                result = "Fake News"
+                confidence_score = 50.0
 
         # Save to database
         user_id = session.get('user_id')

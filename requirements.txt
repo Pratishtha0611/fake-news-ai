@@ -4,8 +4,6 @@ pandas
 numpy
 nltk
 Werkzeug
-torch
-transformers
 Flask-WTF
 beautifulsoup4
 requests
