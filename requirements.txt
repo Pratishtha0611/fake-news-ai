@@ -12,3 +12,5 @@ requests
 textblob
 PyPDF2
 gunicorn
+pymongo
+python-dotenv

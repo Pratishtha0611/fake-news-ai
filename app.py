@@ -1,4 +1,4 @@
-import sqlite3
+import os
 import re
 import csv
 import io
@@ -12,57 +12,30 @@ from transformers import pipeline
 from flask_wtf.csrf import CSRFProtect
 import PyPDF2
 from textblob import TextBlob
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'fake_news_secret_key'
+app.secret_key = os.environ.get('SECRET_KEY', 'fake_news_secret_key')
 csrf = CSRFProtect(app)
-DATABASE = 'app.db'
 
-def get_db_connection():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
+# MongoDB Connection
+MONGO_URI = os.environ.get('MONGO_URI')
+if MONGO_URI and MONGO_URI != "your_mongodb_atlas_connection_string_here":
+    client = MongoClient(MONGO_URI)
+else:
+    # Fallback for local development if URI is not set
+    client = MongoClient('mongodb://localhost:27017/')
 
-# Initialize Database
-def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    ''')
-    
-    # Safely add is_admin column if it doesn't exist
-    cursor.execute("PRAGMA table_info(users)")
-    columns = [info[1] for info in cursor.fetchall()]
-    if 'is_admin' not in columns:
-        cursor.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0')
-        
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            news TEXT NOT NULL,
-            result TEXT NOT NULL,
-            confidence REAL NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        )
-    ''')
-    
-    # Add user_feedback column if it doesn't exist
-    cursor.execute("PRAGMA table_info(predictions)")
-    columns = [info[1] for info in cursor.fetchall()]
-    if 'user_feedback' not in columns:
-        cursor.execute('ALTER TABLE predictions ADD COLUMN user_feedback INTEGER DEFAULT 0')
-    conn.commit()
-    conn.close()
+db = client['fake_news_db']
+users_collection = db['users']
+predictions_collection = db['predictions']
 
-init_db()
+# Ensure email is unique
+users_collection.create_index("email", unique=True)
 
 # Custom login_required decorator
 def login_required(f):
@@ -83,17 +56,19 @@ print("Model loaded successfully!")
 def inject_user():
     user = None
     if 'user_id' in session:
-        conn = get_db_connection()
-        user_row = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
-        conn.close()
-        if user_row:
-            class CurrentUser:
-                is_authenticated = True
-                id = user_row['id']
-                name = user_row['name']
-                email = user_row['email']
-                is_admin = bool(user_row['is_admin']) if 'is_admin' in user_row.keys() else False
-            user = CurrentUser()
+        try:
+            user_row = users_collection.find_one({'_id': ObjectId(session['user_id'])})
+            if user_row:
+                class CurrentUser:
+                    is_authenticated = True
+                    id = str(user_row['_id'])
+                    name = user_row.get('name', '')
+                    email = user_row.get('email', '')
+                    is_admin = bool(user_row.get('is_admin', False))
+                user = CurrentUser()
+        except Exception as e:
+            print(f"Error fetching user: {e}")
+            session.pop('user_id', None)
     
     if not user:
         class GuestUser:
@@ -188,19 +163,19 @@ def predict():
 
         # Save to database
         user_id = session.get('user_id')
-        created_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        prediction_doc = {
+            'news': news,
+            'result': result,
+            'confidence': confidence_score,
+            'created_at': datetime.utcnow(),
+            'user_id': ObjectId(user_id) if user_id else None,
+            'user_feedback': 0
+        }
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            'INSERT INTO predictions (news, result, confidence, created_at, user_id) VALUES (?, ?, ?, ?, ?)',
-            (news, result, confidence_score, created_at, user_id)
-        )
-        prediction_id = cursor.lastrowid
-        conn.commit()
+        insert_result = predictions_collection.insert_one(prediction_doc)
+        prediction_id = str(insert_result.inserted_id)
 
         if is_ajax:
-            conn.close()
             return jsonify({
                 'prediction_id': prediction_id,
                 'prediction': result,
@@ -209,11 +184,10 @@ def predict():
                 'found_fake_words': found_fake_words
             })
         else:
-            user_predictions = conn.execute('SELECT * FROM predictions WHERE user_id = ?', (user_id,)).fetchall()
-            conn.close()
+            user_predictions = list(predictions_collection.find({'user_id': ObjectId(user_id)}))
             total_predictions = len(user_predictions)
-            fake_count = sum(1 for p in user_predictions if p['result'] == 'Fake News')
-            real_count = sum(1 for p in user_predictions if p['result'] == 'Real News')
+            fake_count = sum(1 for p in user_predictions if p.get('result') == 'Fake News')
+            real_count = sum(1 for p in user_predictions if p.get('result') == 'Real News')
             return render_template('dashboard.html', prediction=result, confidence=confidence_score, 
                                    total_predictions=total_predictions, fake_count=fake_count, real_count=real_count)
             
@@ -235,21 +209,21 @@ def signup():
         email = request.form.get('email')
         password = request.form.get('password')
 
-        conn = get_db_connection()
-        user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+        user = users_collection.find_one({'email': email})
         
         if user:
-            conn.close()
             flash('Email already exists. Please login.', 'error')
             return redirect(url_for('login'))
 
         hashed_password = generate_password_hash(password, method='scrypt')
-        is_admin = 1 if email == 'admin@test.com' else 0
+        is_admin = True if email == 'admin@test.com' else False
         
-        conn.execute('INSERT INTO users (name, email, password, is_admin) VALUES (?, ?, ?, ?)', 
-                     (name, email, hashed_password, is_admin))
-        conn.commit()
-        conn.close()
+        users_collection.insert_one({
+            'name': name,
+            'email': email,
+            'password': hashed_password,
+            'is_admin': is_admin
+        })
 
         flash('Account created successfully! You can now log in.', 'success')
         return redirect(url_for('login'))
@@ -265,12 +239,10 @@ def login():
         email = request.form.get('email')
         password = request.form.get('password')
 
-        conn = get_db_connection()
-        user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
-        conn.close()
+        user = users_collection.find_one({'email': email})
 
         if user and check_password_hash(user['password'], password):
-            session['user_id'] = user['id']
+            session['user_id'] = str(user['_id'])
             return redirect(url_for('dashboard'))
         else:
             flash('Please check your login details and try again.', 'error')
@@ -285,9 +257,7 @@ def forgot_password():
     if request.method == 'POST':
         email = request.form.get('email')
         
-        conn = get_db_connection()
-        user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
-        conn.close()
+        user = users_collection.find_one({'email': email})
 
         if user:
             # In a real app, send an email. For this demo, redirect directly to reset.
@@ -313,10 +283,7 @@ def reset_password(email):
 
         hashed_password = generate_password_hash(password, method='scrypt')
         
-        conn = get_db_connection()
-        conn.execute('UPDATE users SET password = ? WHERE email = ?', (hashed_password, email))
-        conn.commit()
-        conn.close()
+        users_collection.update_one({'email': email}, {'$set': {'password': hashed_password}})
 
         flash('Your password has been successfully reset! You can now log in.', 'success')
         return redirect(url_for('login'))
@@ -337,13 +304,11 @@ def dashboard():
 @app.route('/analytics')
 @login_required
 def analytics():
-    conn = get_db_connection()
-    user_predictions = conn.execute('SELECT * FROM predictions WHERE user_id = ?', (session['user_id'],)).fetchall()
-    conn.close()
+    user_predictions = list(predictions_collection.find({'user_id': ObjectId(session['user_id'])}))
     
     total_predictions = len(user_predictions)
-    fake_count = sum(1 for p in user_predictions if p['result'] == 'Fake News')
-    real_count = sum(1 for p in user_predictions if p['result'] == 'Real News')
+    fake_count = sum(1 for p in user_predictions if p.get('result') == 'Fake News')
+    real_count = sum(1 for p in user_predictions if p.get('result') == 'Real News')
 
     return render_template(
         'analytics.html',
@@ -355,17 +320,20 @@ def analytics():
 @app.route('/history')
 @login_required
 def history():
-    conn = get_db_connection()
-    raw_history = conn.execute('SELECT * FROM predictions WHERE user_id = ? ORDER BY created_at DESC', (session['user_id'],)).fetchall()
-    conn.close()
+    raw_history = list(predictions_collection.find({'user_id': ObjectId(session['user_id'])}).sort('created_at', -1))
     
     history_data = []
     for row in raw_history:
         row_dict = dict(row)
-        try:
-            row_dict['created_at'] = datetime.strptime(row_dict['created_at'], '%Y-%m-%d %H:%M:%S')
-        except:
-            row_dict['created_at'] = datetime.utcnow()
+        row_dict['id'] = str(row_dict['_id'])
+        # Handle created_at formatting
+        if 'created_at' in row_dict and isinstance(row_dict['created_at'], datetime):
+            pass # already a datetime object
+        else:
+            try:
+                row_dict['created_at'] = datetime.strptime(str(row_dict.get('created_at', '')), '%Y-%m-%d %H:%M:%S')
+            except:
+                row_dict['created_at'] = datetime.utcnow()
         history_data.append(row_dict)
 
     return render_template('history.html', history=history_data)
@@ -373,49 +341,52 @@ def history():
 @app.route('/admin')
 @login_required
 def admin():
-    conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    user = users_collection.find_one({'_id': ObjectId(session['user_id'])})
     
-    if not user or not ('is_admin' in user.keys() and user['is_admin']): 
-        conn.close()
+    if not user or not user.get('is_admin', False): 
         flash('Access denied. Administrator privileges required.', 'error')
         return redirect(url_for('dashboard'))
         
-    users = conn.execute('SELECT * FROM users').fetchall()
-    raw_predictions = conn.execute('SELECT * FROM predictions ORDER BY created_at DESC').fetchall()
-    conn.close()
+    users = list(users_collection.find())
+    for u in users:
+        u['id'] = str(u['_id'])
+        
+    raw_predictions = list(predictions_collection.find().sort('created_at', -1))
 
     predictions = []
     for row in raw_predictions:
         row_dict = dict(row)
-        try:
-            row_dict['created_at'] = datetime.strptime(row_dict['created_at'], '%Y-%m-%d %H:%M:%S')
-        except:
-            row_dict['created_at'] = datetime.utcnow()
+        row_dict['id'] = str(row_dict['_id'])
+        # Add user email for admin view
+        pred_user = users_collection.find_one({'_id': row_dict.get('user_id')})
+        row_dict['user_email'] = pred_user.get('email', 'Unknown') if pred_user else 'Unknown'
+        
+        if 'created_at' in row_dict and isinstance(row_dict['created_at'], datetime):
+            pass
+        else:
+            try:
+                row_dict['created_at'] = datetime.strptime(str(row_dict.get('created_at', '')), '%Y-%m-%d %H:%M:%S')
+            except:
+                row_dict['created_at'] = datetime.utcnow()
         predictions.append(row_dict)
 
     return render_template('admin.html', users=users, predictions=predictions)
 
-@app.route('/admin/delete/<int:user_id>', methods=['POST'])
+@app.route('/admin/delete/<string:user_id>', methods=['POST'])
 @login_required
 def delete_user(user_id):
-    conn = get_db_connection()
-    current = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    current = users_collection.find_one({'_id': ObjectId(session['user_id'])})
     
-    if not current or not ('is_admin' in current.keys() and current['is_admin']): 
-        conn.close()
+    if not current or not current.get('is_admin', False): 
         flash('Access denied.', 'error')
         return redirect(url_for('dashboard'))
 
     if session['user_id'] == user_id:
-        conn.close()
         flash('You cannot delete your own admin account.', 'error')
         return redirect(url_for('admin'))
 
-    conn.execute('DELETE FROM predictions WHERE user_id = ?', (user_id,))
-    conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
-    conn.commit()
-    conn.close()
+    predictions_collection.delete_many({'user_id': ObjectId(user_id)})
+    users_collection.delete_one({'_id': ObjectId(user_id)})
     
     flash('User deleted successfully.', 'success')
     return redirect(url_for('admin'))
@@ -430,27 +401,26 @@ def feedback():
     prediction_id = data.get('prediction_id')
     feedback_value = data.get('feedback') # 1 for correct, -1 for incorrect
 
-    if prediction_id is None or feedback_value not in [1, -1]:
+    if not prediction_id or feedback_value not in [1, -1]:
         return jsonify({'error': 'Invalid feedback data'}), 400
         
-    conn = get_db_connection()
-    row = conn.execute('SELECT * FROM predictions WHERE id = ? AND user_id = ?', (prediction_id, session['user_id'])).fetchone()
-    if not row:
-        conn.close()
-        return jsonify({'error': 'Prediction not found or access denied'}), 404
-        
-    conn.execute('UPDATE predictions SET user_feedback = ? WHERE id = ?', (feedback_value, prediction_id))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'success': True, 'message': 'Feedback recorded!'})
+    try:
+        row = predictions_collection.find_one({'_id': ObjectId(prediction_id), 'user_id': ObjectId(session['user_id'])})
+        if not row:
+            return jsonify({'error': 'Prediction not found or access denied'}), 404
+            
+        predictions_collection.update_one(
+            {'_id': ObjectId(prediction_id)},
+            {'$set': {'user_feedback': feedback_value}}
+        )
+        return jsonify({'success': True, 'message': 'Feedback recorded!'})
+    except Exception as e:
+        return jsonify({'error': 'Error recording feedback'}), 500
 
 @app.route('/export')
 @login_required
 def export_history():
-    conn = get_db_connection()
-    user_predictions = conn.execute('SELECT news, result, confidence, created_at, user_feedback FROM predictions WHERE user_id = ? ORDER BY created_at DESC', (session['user_id'],)).fetchall()
-    conn.close()
+    user_predictions = list(predictions_collection.find({'user_id': ObjectId(session['user_id'])}).sort('created_at', -1))
 
     si = io.StringIO()
     cw = csv.writer(si)
@@ -458,13 +428,14 @@ def export_history():
     
     for row in user_predictions:
         feedback_str = 'Not Provided'
-        if row['user_feedback'] == 1:
+        if row.get('user_feedback') == 1:
             feedback_str = 'Correct'
-        elif row['user_feedback'] == -1:
+        elif row.get('user_feedback') == -1:
             feedback_str = 'Incorrect'
             
-        snippet = row['news'][:100].replace('\n', ' ') + '...' if len(row['news']) > 100 else row['news'].replace('\n', ' ')
-        cw.writerow([row['created_at'], snippet, row['result'], row['confidence'], feedback_str])
+        news = row.get('news', '')
+        snippet = news[:100].replace('\n', ' ') + '...' if len(news) > 100 else news.replace('\n', ' ')
+        cw.writerow([row.get('created_at'), snippet, row.get('result'), row.get('confidence'), feedback_str])
 
     output = make_response(si.getvalue())
     output.headers["Content-Disposition"] = "attachment; filename=fake_news_history.csv"
@@ -550,15 +521,10 @@ def analyze_extra():
 @login_required
 def delete_my_account():
     user_id = session['user_id']
-    conn = get_db_connection()
-    # Delete all predictions associated with this user
-    conn.execute('DELETE FROM predictions WHERE user_id = ?', (user_id,))
-    # Delete the user account
-    conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
-    conn.commit()
-    conn.close()
     
-    # Log the user out
+    predictions_collection.delete_many({'user_id': ObjectId(user_id)})
+    users_collection.delete_one({'_id': ObjectId(user_id)})
+    
     session.clear()
     flash("Your account and all history have been permanently deleted.", "success")
     return redirect(url_for('home'))
